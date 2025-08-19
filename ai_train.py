@@ -1,0 +1,1 @@
+# this file will contain information for training the ai based on messages db

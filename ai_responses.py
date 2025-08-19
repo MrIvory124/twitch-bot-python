@@ -1,0 +1,1 @@
+# this file will contain all the information for constructing an ai

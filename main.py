@@ -35,6 +35,7 @@ OWNER_ID = "161325782"  # Your personal User ID..
 
 # streamelements,
 IGNORELIST = [100135110,161325782]
+global IFAI
 
 
 class Bot(commands.AutoBot):
@@ -48,7 +49,7 @@ class Bot(commands.AutoBot):
             owner_id=OWNER_ID,
             prefix="!",
             subscriptions=subs,
-            force_subscribe=True,
+            force_subscribe=False,
         )
 
     async def setup_hook(self) -> None:
@@ -57,7 +58,9 @@ class Bot(commands.AutoBot):
         component = MyComponent(self)
         await component.setup()
         await self.add_component(component)
+        IFAI = True
         component.ai_reminder.start()
+        component.ai_talk.start()
         '''
         twitchio.utils.setup_logging(level=logging.DEBUG)
         old = self.dispatch
@@ -200,6 +203,16 @@ class MyComponent(commands.Component):
         await ctx.send(f"For more information visit https://link.mrivory124.com/optout")
 
     @commands.command()
+    async def aitoggle(self, ctx: commands.Context) -> None:
+        """Command that disables/enables the ai message generation
+
+        !aitoggle
+        """
+        if ctx.author.moderator:
+            ctx.reply(f"AI message generation disabled.")
+            IFAI = not IFAI
+
+    @commands.command()
     async def optin(self, ctx: commands.Context) -> None:
         """Command that removes the user from the exclude list on the message gathering
 
@@ -209,6 +222,10 @@ class MyComponent(commands.Component):
         await ctx.reply(f"You have been opted in to all future message gathering, {ctx.chatter}!")
         await ctx.send(f"For more information visit https://link.mrivory124.com/ai")
 
+    @commands.command()
+    async def clip(self, ctx: commands.Context) -> None:
+        print("Hello")
+
     @routines.routine(delta=datetime.timedelta(seconds=1800), wait_first=True)
     async def ai_reminder(self) -> None:
         """A basic routine which does something every 30 minutes.
@@ -216,6 +233,27 @@ class MyComponent(commands.Component):
         This routine will wait 30 minutes first after starting, before making the first iteration.
         """
         await self.user.send_message(sender=self.bot.user, message="Chat messages are being collected. You can learn more here: https://link.mrivory124.com/ai")
+
+    @routines.routine(delta=datetime.timedelta(seconds=60), wait_first=True)
+    async def ai_talk(self) -> None:
+        """A basic routine that sends an ai generated image every 60 seconds.
+
+        This routine will wait 60 seconds first after starting, before making the first iteration.
+        """
+        if IFAI:
+            LOGGER.info("Generating message...")
+            async with self.msg_database.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT * FROM messages ORDER BY time DESC LIMIT 15;")
+                    rows = await cur.fetchall()
+
+            prompt_message = ""
+            for r in rows:
+                prompt_message += f"{r['message']}\n"
+
+            response = ai_responses.response(prompt_message)
+            await self.user.send_message(sender=self.bot.user, message=response)
+            LOGGER.info(f"Sent a message {response}")
 
 '''
     @commands.command()
@@ -350,6 +388,8 @@ async def store_optout_user(db: asqlite.Pool, user_id: str, username: str) -> No
 async def remove_optout_user(db: asqlite.Pool, user_id: str) -> None:
     async with db.acquire() as connection:
         await connection.execute("""DELETE FROM excluded_users WHERE user_id = ?""", (user_id,))
+
+
 
 # Our main entry point for our Bot
 # Best to setup_logging here, before anything starts

@@ -25,11 +25,16 @@ http://localhost:4343/oauth?scopes=channel:bot%20channel:moderate%20user:read:ch
 
 LOGGER: logging.Logger = logging.getLogger("Bot")
 
+
+# TODO remove plain text
 # Consider using a .env or another form of Configuration file!
 CLIENT_ID: str = "tvjxfyqmsiehcyczmt4s4hw5xczhut"  # The CLIENT ID from the Twitch Dev Console
 CLIENT_SECRET: str = "a9orjbywhmgkvfv3gibh2zk82ozo1l"  # The CLIENT SECRET from the Twitch Dev Console
 BOT_ID = "1315366618"  # The Account ID of the bot user...
 OWNER_ID = "161325782"  # Your personal User ID..
+
+# streamelements,
+IGNORELIST = [100135110,161325782]
 
 
 class Bot(commands.AutoBot):
@@ -133,6 +138,8 @@ class MyComponent(commands.Component):
         # check to see if user is opted out
         if payload.chatter.id == self.bot.bot_id:
             return  # Ignore messages from the bot itself
+        if IGNORELIST.__contains__(int(payload.chatter.id)):
+            return # Do not record people on the ignore list
         async with self.optout_database.acquire() as connection:
             query = await connection.fetchall("""SELECT * from excluded_users WHERE user_id = ?""", (payload.chatter.id,))
             if not query:

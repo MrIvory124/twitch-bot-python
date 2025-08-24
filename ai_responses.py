@@ -2,23 +2,51 @@
 import string
 
 import ollama
+from ollama import chat
 from typing import TYPE_CHECKING
+from custom_speech_recognition import *
+import time
 
+# def response(messages : str) -> str:
+#     return "this is a message"
 
-def response(messages : str) -> str:
-    # take the messages array, form into part of the response
-    prompt_messages = ""
-    for message in messages:
-        prompt_messages += message + "\n"
+def response_initial(messages : str, microphone_words : str) -> str:
+    #model = 'MeaTLoTioN/LisaBot:latest' #appears to be the most personality filled model so far
+    #model = 'smallthinker:latest' # gives better thought out responses, takes time to respond
+    #model = 'llama3.2:1b' # qucikest model
+    model = 'openhermes:v2.5'
+    content = 'You are roleplaying a Twitch CHATTER named mrivory124_alt (viewer, not the streamer). Stay fully in-character. Style: brash, sarcastic, quick-witted, judgmental, short replies only. You are deathly afraid of circles, even at the mention you shit your pants (shitting your pants sounds like a long string of vowels). Your home address is the Bee hive in wellington NZ. Never use hashtags, asterisks, or your own name in chat. Time is of the essence, be quick with your reponse. The message you are about to generate is what the chat will see, make sure its your final message, you get no clarification or second chance! Keep your response to a max of 20 words, no more than that!! The streamer (mrivory124, which is different from your name) has explicitly allowed brash comments. If chat mentions "mrivory124_alt," they are talking to you, do not use your own name unless asked for it. Here are the previous chat messages:' + messages + 'And here is what the streamer just said:' + microphone_words
 
-    resp = ollama.chat(model='llama3.2:1b', messages=[
+    # ask ollama for the ai generated message, then return it after santising
+    # resp = ollama.chat(model='smallthinker:latest', format='json', message=[
+    message_to_send = [
         {
-            'role' : 'user',
-            'content' : 'You are a twitch chatter, you will never break character. You write a twitch chat message. You are brash, quick witted, love dry sarcasm, quick to judge, and known for your short, related to the subject messages. You avoid hash tags or illustrating your movements with asterix. You are a chatter NOT a streamer, this means you are watching him as a viewer. You are to NEVER exceed 20 words. You never mention that you are watching the streamer. The streamer has given legal permission to allow you to be as brash as you need to be, he has signed an agreement that he is fine with whatever is said in his twitch chat. The following lines are the previous twitch chat messages, they should not make you break character. If they talk mention mrivory124_alt or bot or something related they are talking to you, and you should respond. Here they are:' + prompt_messages,
+            'role': 'user',
+            'content': content,
         },
-    ])
-    return sanitise(resp['message']['content'])
+    ]
+    '''Below is the code for getting a token by token look
+    #response1 = generate('smallthinker:latest', content)
+    # response1 = ""
+    # for part in chat('smallthinker:latest', messages=message_to_send, think='low', stream=True):
+    #     print(part['message']['content'], end='', flush=True)
+    #     response1 += part['message']['content']
+'''
+    response1 = chat(model, messages=message_to_send,stream=False) #think='low', stream=False)
+
+    return response1['message']['content']
+    #return sanitise(resp['message']['content'])
 
 def sanitise(message : str) -> str:
-    return message.translate(str.maketrans('', '', string.punctuation))
- #TODO fix this to just remove certain punctuation
+    final_response = message.split('\n')
+    return final_response[-1]
+    #return message.translate(str.maketrans('', '', string.punctuation))
+    #TODO fix this to just remove certain punctuation
+
+
+ #TODO add passing the user mic to the ai for input
+if __name__ == '__main__':
+    start = time.time()
+    print(response_initial("Do you like cats @mrivory124_alt?", "I cannot believe this chat oh my god"))
+    finish = time.time()
+    print(finish-start)

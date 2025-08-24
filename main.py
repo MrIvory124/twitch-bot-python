@@ -11,9 +11,12 @@ from twitchio import eventsub
 from twitchio.ext import commands, routines
 import threading
 import inspect
+import custom_tts
+from custom_tts import Voice
 
 import ai_responses
 import custom_speech_recognition as sr
+
 
 if TYPE_CHECKING:
     import sqlite3
@@ -153,6 +156,8 @@ class AiChatBotComponent(commands.Component):
         # start the bot listening to the mic immediately. Does not start if the ai message generation is off
         if self.IFAI:
             sr.start_listening()
+        # start tts worker thread
+        self.tts = None
 
     # When the bot is being setup
     async def setup(self):
@@ -160,6 +165,8 @@ class AiChatBotComponent(commands.Component):
         self.msg_database = await open_msg_db()
         self.optout_database = await open_user_db()
         await self.user.send_message(sender=self.bot.user, message="IM ALIVE!")
+        self.tts = custom_tts.TTSWorker(models_dir="tts_voice_files")
+        self.tts.start()
 
     # Listens to incoming message events, and processes them
     # Currently stores them in a db with some information that is gathered alongside it
@@ -319,8 +326,15 @@ class AiChatBotComponent(commands.Component):
             return
 
         # once the ai message generation is done, send the message
+
         await self.user.send_message(sender=self.bot.user, message=response)
         LOGGER.warning("Sent a message %s", response)
+        self.tts.speak(response, Voice.RYAN_MALE)
+
+    async def teardown(self):
+        if self.tts:
+            self.tts.stop()  # signals and join
+            self.tts = None
 
 '''
     # placeholder to remind me how the structure works

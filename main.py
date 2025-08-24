@@ -35,6 +35,17 @@ IGNORELIST = [100135110, 161325782]
 BOT_PREFIX = "!"
 DEBUG_FLAG = False
 
+### LOADING LOGIN INFORMATION ###
+# the config contains all the login information and should be kept from being seen online
+with open("config.json", "r") as f:
+    config = json.load(f)
+    f.close()
+
+CLIENT_ID = config.get("CLIENT_ID")
+CLIENT_SECRET = config.get("CLIENT_SECRET")
+BOT_ID = config.get("BOT_ID")
+OWNER_ID = config.get("OWNER_ID")
+
 '''
 The bot class contains all the things that a twitch bot would do.
 
@@ -48,16 +59,6 @@ class Bot(commands.AutoBot):
     def __init__(self, *, token_database: asqlite.Pool, subs: list[eventsub.SubscriptionPayload]) -> None:
         self.token_database = token_database
         self.debug_option = DEBUG_FLAG
-
-        # the config contains all the login information and should be kept from being seen online
-        with open("config.json", "r") as f:
-            config = json.load(f)
-            f.close()
-
-        CLIENT_ID = config["client_id"]
-        CLIENT_SECRET = config["client_secret"]
-        BOT_ID = config["bot_id"]
-        OWNER_ID = config["owner_id"]
 
         super().__init__(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, bot_id=BOT_ID, owner_id=OWNER_ID, prefix=BOT_PREFIX,
             subscriptions=subs, force_subscribe=False, )
@@ -473,7 +474,7 @@ async def open_msg_db() -> asqlite.Pool:
 
 
 
-async def store_user_msg(db: asqlite.Pool, message_id: str, user_id: str, message: str) -> None
+async def store_user_msg(db: asqlite.Pool, message_id: str, user_id: str, message: str) -> None:
     # helper method for storing messages in the message.db
     async with db.acquire() as connection:
         await connection.execute("""INSERT INTO messages(message_id, user_id, message)

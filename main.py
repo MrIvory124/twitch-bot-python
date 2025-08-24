@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     import sqlite3
 import os
 
-# scopes for the bot and user
+# links for the user to allow the bot to work
 '''
 http://localhost:4343/oauth?scopes=user:read:chat%20user:write:chat%20moderator:read:chat_messages%20user:bot%20channel:moderate&force_verify=true - bot
 http://localhost:4343/oauth?scopes=channel:bot%20channel:moderate%20user:read:chat&force_verify=true - user ***
@@ -26,46 +27,65 @@ http://localhost:4343/oauth?scopes=channel:bot%20channel:moderate%20user:read:ch
 
 LOGGER: logging.Logger = logging.getLogger("Bot")
 
-# TODO remove plain text
-# Consider using a .env or another form of Configuration file!
-CLIENT_ID: str = "tvjxfyqmsiehcyczmt4s4hw5xczhut"  # The CLIENT ID from the Twitch Dev Console
-CLIENT_SECRET: str = "a9orjbywhmgkvfv3gibh2zk82ozo1l"  # The CLIENT SECRET from the Twitch Dev Console
-BOT_ID = "1315366618"  # The Account ID of the bot user...
-OWNER_ID = "161325782"  # Your personal User ID..
-
 #TODO Make it so that people in the discord can ask it questions
 
-# streamelements,
+###### OPTIONS ######
+# add any accounts you want to be ignored by the bot, first is streamelements
 IGNORELIST = [100135110, 161325782]
-global IfAi
+BOT_PREFIX = "!"
+DEBUG_FLAG = False
 
+'''
+The bot class contains all the things that a twitch bot would do.
 
+The first part of the bot is all about signing into the twitch client and configuring it to work with the twitch api. 
+
+It contains timers that fire at specified intervals.
+It contains custom commands.
+'''
 class Bot(commands.AutoBot):
+    # Class constructor, we load in all required variables from the config file, and set up the bot
     def __init__(self, *, token_database: asqlite.Pool, subs: list[eventsub.SubscriptionPayload]) -> None:
         self.token_database = token_database
+        self.debug_option = DEBUG_FLAG
 
-        super().__init__(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, bot_id=BOT_ID, owner_id=OWNER_ID, prefix="!",
+        # the config contains all the login information and should be kept from being seen online
+        with open("config.json", "r") as f:
+            config = json.load(f)
+            f.close()
+
+        CLIENT_ID = config["client_id"]
+        CLIENT_SECRET = config["client_secret"]
+        BOT_ID = config["bot_id"]
+        OWNER_ID = config["owner_id"]
+
+        super().__init__(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, bot_id=BOT_ID, owner_id=OWNER_ID, prefix=BOT_PREFIX,
             subscriptions=subs, force_subscribe=False, )
 
+    '''
+    This section runs when the bot is being setup, timers should be started here.
+    The add_component section contains the commands and timers we want to setup, can add more or less if you want the bot to have specific components enabled in it.
+    '''
     async def setup_hook(self) -> None:
         # Add our component which contains our commands...
-        # await self.add_component(MyComponent(self))
-        component = MyComponent(self)
+        component = AiChatBotComponent(self)
         await component.setup()
         await self.add_component(component)
-        global IfAi
-        IfAi = True
+        # start timers
         component.ai_reminder.start()
         component.ai_talk.start()
 
-        '''
-        twitchio.utils.setup_logging(level=logging.DEBUG)
-        old = self.dispatch
-        def _trace(name, *a, **k):
-            LOGGER.debug("DISPATCH -> %s", name)
-            return old(name, *a, **k)
-        #self.dispatch = _trace'''
+        # enabled debug messages if debug is on
+        if self.debug_option:
+            twitchio.utils.setup_logging(level=logging.DEBUG)
+            old = self.dispatch
+            def _trace(name, *a, **k):
+                LOGGER.debug("DISPATCH -> %s", name)
+                return old(name, *a, **k)
 
+    '''
+    This method contains all the logic for if the user send authorisation through the links at the top.
+    '''
     async def event_oauth_authorized(self, payload: twitchio.authentication.UserTokenPayload) -> None:
         await self.add_token(payload.access_token, payload.refresh_token)
 
@@ -84,10 +104,10 @@ class Bot(commands.AutoBot):
             eventsub.ChannelUnbanSubscription(broadcaster_user_id=payload.user_id, user_id=self.bot_id), ]
 
         resp: twitchio.MultiSubscribePayload = await self.multi_subscribe(subs)
-        # LOGGER.error("Created EventSub: %s", [s.type for s in resp.data]) # this line is not being hit
         if resp.errors:
             LOGGER.warning("Failed to subscribe to: %r, for user: %s", resp.errors, payload.user_id)
 
+    # Returned tokens from the authorisation process are stored in a db
     async def add_token(self, token: str, refresh: str) -> twitchio.authentication.ValidateTokenPayload:
         # Make sure to call super() as it will add the tokens interally and return us some data...
         resp: twitchio.authentication.ValidateTokenPayload = await super().add_token(token, refresh)
@@ -96,7 +116,7 @@ class Bot(commands.AutoBot):
         query = """
                 INSERT INTO tokens (user_id, token, refresh)
                 VALUES (?, ?, ?) ON CONFLICT(user_id)
-        DO
+                DO
                 UPDATE SET
                     token = excluded.token,
                     refresh = excluded.refresh; \
@@ -112,52 +132,66 @@ class Bot(commands.AutoBot):
         LOGGER.info("Successfully logged in as: %s", self.bot_id)
 
 
-class MyComponent(commands.Component):
+'''
+    The component class contains everything we want the bot to do.
+    Commands, timers and other subscription related things are contained in here
+'''
+class AiChatBotComponent(commands.Component):
     # An example of a Component with some simple commands and listeners
     # You can use Components within modules for a more organized codebase and hot-reloading.
 
+    # class constructor
     def __init__(self, bot: Bot) -> None:
         # Passing args is not required...
         # We pass bot here as an example...
         self.bot = bot
+        self.IFAI = True
         self.msg_database = None  # Will be initialized asynchronously
         self.optout_database = None  # Will be initialized asynchronously
         self.user = bot.create_partialuser(user_id=OWNER_ID)
-        sr.start_listening()
+        # start the bot listening to the mic immediately. Does not start if the ai message generation is off
+        if self.IFAI:
+            sr.start_listening()
 
+    # When the bot is being setup
     async def setup(self):
         # handles opening both the msgs and user databases
         self.msg_database = await open_msg_db()
         self.optout_database = await open_user_db()
         await self.user.send_message(sender=self.bot.user, message="IM ALIVE!")
 
-    # An example of listening to an event
-    # We use a listener in our Component to display the messages received.
+    # Listens to incoming message events, and processes them
+    # Currently stores them in a db with some information that is gathered alongside it
     @commands.Component.listener("message")
     async def event_message(self, payload: twitchio.ChatMessage) -> None:
         print(f"[{payload.broadcaster.name}] - {payload.chatter.name}: {payload.text}")
+
         # check to see if user is opted out
         if payload.chatter.id == self.bot.bot_id:
             return  # Ignore messages from the bot itself
         if IGNORELIST.__contains__(int(payload.chatter.id)):
             return  # Do not record people on the ignore list
+        # check the excluded users database to see if they opted out
         async with self.optout_database.acquire() as connection:
             query = await connection.fetchall("""SELECT *
                                                  from excluded_users
                                                  WHERE user_id = ?""", (payload.chatter.id,))
+            # if they have not opted out, store it in the message db
             if not query:
-                # User has not opted out, store their message
                 await store_user_msg(self.msg_database, payload.id, payload.chatter.id, payload.text)
 
+    '''
+    Upon a message being deleted by a bot, remove it from the db
+    '''
     @commands.Component.listener()
     async def event_message_delete(self, payload: twitchio.ChatMessageDelete):
         # look at the database to see if the message is in there, then delete
         await self.delete_db_message(payload)
+
     '''
-    Upon the user being banned, delete their messages from the last 30m
+    Upon a user being banned, delete their messages from the last 30m
     This is in here to avoid bots and vulgar language
     '''
-
     @commands.Component.listener("event_ban")
     async def event_ban(self, payload: twitchio.ChannelBan) -> None:
         LOGGER.info(
@@ -171,6 +205,7 @@ class MyComponent(commands.Component):
             await conn.execute("DELETE FROM messages WHERE user_id = ? AND time >= ?", (payload.user.id, cutoff_str), )
             await conn.commit()
 
+    # helper method for deleting messages from the database
     async def delete_db_message(self, payload):
         async with self.msg_database.acquire() as connection:
             await connection.execute("""DELETE
@@ -179,23 +214,14 @@ class MyComponent(commands.Component):
             LOGGER.info(
                 f"Deleted message from {payload.user.name} in channel {payload.broadcaster.name}: {payload.message_id}")
 
-    '''
-    @commands.Component.listener()
-    async def event_channel_chat_message_delete(self, payload: twitchio.ChatMessageDelete) -> None:
-        """
-        Listener for when a moderator deletes a specific chat message.
-        """
-        LOGGER.info(
-            f"Message deleted in channel {payload.broadcaster}: "
-            f"Message ID {payload.message_id} from {payload.user}"
-        )
-    '''
 
     @commands.command()
     async def optout(self, ctx: commands.Context) -> None:
         """Command that adds the user to the exclude list on the message gathering
 
         !optout
+
+        Accessible by all users
         """
         # stores the user id as well as current presenting username. Will only search using id in future
         await store_optout_user(self.optout_database, ctx.chatter.id, ctx.chatter.name)
@@ -207,17 +233,20 @@ class MyComponent(commands.Component):
         """Command that disables/enables the ai message generation
 
         !aitoggle
+
+        Accessible by moderators only
         """
         if ctx.author.moderator:
-            global IfAi
-            IfAi = not IfAi
-            await ctx.reply(f"AI message generation: {IfAi}")
+            self.IFAI = not self.IFAI
+            await ctx.reply(f"AI message generation: {self.IFAI}")
 
     @commands.command()
     async def optin(self, ctx: commands.Context) -> None:
         """Command that removes the user from the exclude list on the message gathering
 
         !optin
+
+        Accessible by all users
         """
         await remove_optout_user(self.optout_database, ctx.chatter.id)
         await ctx.reply(f"You have been opted in to all future message gathering, {ctx.chatter}!")
@@ -225,47 +254,58 @@ class MyComponent(commands.Component):
 
     @commands.command()
     async def clip(self, ctx: commands.Context) -> None:
+        """Clip command creates a clip from the last 90s
+
+        !clip
+
+        Accessible by all users, has a cooldown to prevent spammage
+        """
         print("Hello")
 
-    @routines.routine(delta=datetime.timedelta(seconds=1800), wait_first=True)
+    @routines.routine(delta=datetime.timedelta(seconds=900), wait_first=True)
     async def ai_reminder(self) -> None:
-        """A basic routine which does something every 30 minutes.
+        """A basic routine which reminds users every 15 minutes that messages are being collected.
 
         This routine will wait 30 minutes first after starting, before making the first iteration.
         """
         await self.user.send_message(sender=self.bot.user,
                                      message="Chat messages are being collected. You can learn more here: https://link.mrivory124.com/ai")
 
-    @routines.routine(delta=datetime.timedelta(seconds=120), wait_first=True)
+    @routines.routine(delta=datetime.timedelta(seconds=12), wait_first=True)
     async def ai_talk(self) -> None:
         """A basic routine that sends an ai generated image every 60 seconds.
 
         This routine will wait 60 seconds first after starting, before making the first iteration.
         """
-        global IfAi
-        if not IfAi:
-            return
+        if not self.IFAI:
+            return # do not continue if no ai message generation
 
+        # contains the words recognised from the microphone
         microphone = ""
 
         try:
+            ''' This try method is here because in some cases it does not start
+            listening to the microphone before this is run'''
             sr.stop_listening()
             microphone = sr.return_words()
-            #print(microphone)
         except speech_recognition.UnknownValueError as e:
-            print(e)
+            print("Microphone couldn't be stopped, wasn't listening to begin with!")
 
         LOGGER.info("Generating message...")
+        # Query the database for a certain amount of messages from users
         async with self.msg_database.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("SELECT * FROM messages ORDER BY time DESC LIMIT 5;")
                 rows = await cur.fetchall()
+        # combine those messages into one string to send to the ai generation component
         prompt_message = ""
         for r in rows:
             prompt_message += r['message'] + "\n"
+        # create a thread to get ai generation, then start the mic listening again
         asyncio.create_task(self._ai_talk_tick(prompt_message, microphone))
         sr.start_listening()
 
+    # helper method for ai message generation
     async def _ai_talk_tick(self, prompt_message: str, streamer_mic_results: str) -> None:
         try:
             if inspect.iscoroutinefunction(ai_responses.response_initial):
@@ -277,10 +317,24 @@ class MyComponent(commands.Component):
             LOGGER.error("ai_responses.response failed: %r", e)
             return
 
+        # once the ai message generation is done, send the message
         await self.user.send_message(sender=self.bot.user, message=response)
         LOGGER.warning("Sent a message %s", response)
 
 '''
+    # placeholder to remind me how the structure works
+
+    @commands.Component.listener()
+    async def event_channel_chat_message_delete(self, payload: twitchio.ChatMessageDelete) -> None:
+        """
+        Listener for when a moderator deletes a specific chat message.
+        """
+        LOGGER.info(
+            f"Message deleted in channel {payload.broadcaster}: "
+            f"Message ID {payload.message_id} from {payload.user}"
+        )
+
+
     @commands.command()
     async def hi(self, ctx: commands.Context) -> None:
         """Command that replys to the invoker with Hi <name>!
@@ -354,25 +408,17 @@ async def setup_database(db: asqlite.Pool) -> tuple[list[tuple[str, str]], list[
 
     query = """CREATE TABLE IF NOT EXISTS tokens
                (
-                   user_id
-                   TEXT
-                   PRIMARY
-                   KEY,
-                   token
-                   TEXT
-                   NOT
-                   NULL,
-                   refresh
-                   TEXT
-                   NOT
-                   NULL
+                   user_id TEXT PRIMARY KEY,
+                   token TEXT NOT NULL,
+                   refresh TEXT NOT NULL
                )"""
+
+
     async with db.acquire() as connection:
         await connection.execute(query)
 
         # Fetch any existing tokens...
-        rows: list[sqlite3.Row] = await connection.fetchall("""SELECT *
-                                                               from tokens""")
+        rows: list[sqlite3.Row] = await connection.fetchall("""SELECT * from tokens""")
 
         tokens: list[tuple[str, str]] = []
         subs: list[eventsub.SubscriptionPayload] = []
@@ -397,12 +443,8 @@ async def open_user_db() -> asqlite.Pool:
             async with db.acquire() as conn:
                 await conn.execute("""CREATE TABLE IF NOT EXISTS excluded_users
                                       (
-                                          user_id
-                                          TEXT
-                                          PRIMARY
-                                          KEY,
-                                          username
-                                          TEXT
+                                          user_id TEXT PRIMARY KEY,
+                                          username TEXT
                                       )""")
                 LOGGER.info("Created new user database: %s", user_db_name)
     else:
@@ -410,6 +452,7 @@ async def open_user_db() -> asqlite.Pool:
     return await asqlite.create_pool(user_db_name)
 
 
+# connects to the message database and creates a pool of threads to send information to it
 async def open_msg_db() -> asqlite.Pool:
     msg_db_name = "messages.db"
     if not os.path.exists(msg_db_name):
@@ -418,22 +461,10 @@ async def open_msg_db() -> asqlite.Pool:
             async with db.acquire() as conn:
                 await conn.execute("""CREATE TABLE IF NOT EXISTS messages
                                       (
-                                          message_id
-                                          TEXT
-                                          PRIMARY
-                                          KEY,
-                                          user_id
-                                          TEXT
-                                          NOT
-                                          NULL,
-                                          message
-                                          TEXT
-                                          NOT
-                                          NULL,
-                                          time
-                                          TIMESTAMP
-                                          DEFAULT
-                                          CURRENT_TIMESTAMP
+                                          message_id TEXT PRIMARY KEY,
+                                          user_id TEXT NOT NULL,
+                                          message TEXT NOT NULL,
+                                          time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                                       )""")
                 LOGGER.info("Created new message database: %s", msg_db_name)
     else:
@@ -441,19 +472,24 @@ async def open_msg_db() -> asqlite.Pool:
     return await asqlite.create_pool(msg_db_name)
 
 
-async def store_user_msg(db: asqlite.Pool, message_id: str, user_id: str, message: str) -> None:
+
+async def store_user_msg(db: asqlite.Pool, message_id: str, user_id: str, message: str) -> None
+    # helper method for storing messages in the message.db
     async with db.acquire() as connection:
         await connection.execute("""INSERT INTO messages(message_id, user_id, message)
                                     VALUES (?, ?, ?)""", (message_id, user_id, message))
 
 
+
 async def store_optout_user(db: asqlite.Pool, user_id: str, username: str) -> None:
+    # helper method for storing user optout preferences to the db
     async with db.acquire() as connection:
         await connection.execute("""INSERT INTO excluded_users(user_id, username)
                                     VALUES (?, ?)""", (user_id, username))
 
 
 async def remove_optout_user(db: asqlite.Pool, user_id: str) -> None:
+    # helper method for removing user optout preferences to the db
     async with db.acquire() as connection:
         await connection.execute("""DELETE
                                     FROM excluded_users

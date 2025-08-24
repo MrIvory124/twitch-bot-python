@@ -1,9 +1,9 @@
-speechrecognition
-#vosk  cool but a painful idea
 pip~=25.2
 attrs~=25.3.0
 docutils~=0.17.1
 Sphinx~=5.3.0
+filelock~=3.19.1
 asqlite~=2.0.0
+SpeechRecognition~=3.14.3
 twitchio~=3.1.0
 ollama~=0.5.3

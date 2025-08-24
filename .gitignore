@@ -8,3 +8,4 @@
 /excluded_users.db-shm
 /excluded_users.db-wal
 /.tio.tokens.json
+/config.json

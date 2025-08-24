@@ -12,7 +12,7 @@ A small python coded twitch bot that contains:
 2. Create venv using requirements.txt
 3. Download Ollama and pull the openhermes:v2.5 model (can be set up to work remotely)
 4. Populate config.json with required information
-- Client ID and secret are obtained by registering an app through the https://dev.twitch.tv/console
+- Client ID and secret are obtained by registering an app through the https://dev.twitch.tv/console, with the callback "http://localhost:4343/oauth/callback"
 - Bot ID is the id of the account that will act as the bot and can be found on: [this link](https://www.streamweasels.com/tools/convert-twitch-username-%20to-user-id/)
 - Owner ID is the id of the account that owns the bot (streamers account), can be found on the same link
 6. While the bot is running, visit these links:
@@ -28,6 +28,7 @@ Log into the user that owns the account (your twitch channel) and visit:
 - Integration with obs
 - Allow for choice between each ai gen message for having history or not
 - Switch from JSON for saving sensitive information
+
 
 
 

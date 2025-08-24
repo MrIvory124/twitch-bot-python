@@ -1,0 +1,10 @@
+/tokens.db
+/tokens.db-shm
+/tokens.db-wal
+/messages.db
+/messages.db-shm
+/messages.db-wal
+/excluded_users.db
+/excluded_users.db-shm
+/excluded_users.db-wal
+/.tio.tokens.json

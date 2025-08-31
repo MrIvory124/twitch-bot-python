@@ -28,6 +28,9 @@ Log into the user that owns the account (your twitch channel) and visit:
 - Integration with obs
 - Allow for choice between each ai gen message for having history or not
 - Switch from JSON for saving sensitive information
+- Opt out option that purges
+     - when a user shows up, it immediately informs them (could be dms)
+
 
 
 
